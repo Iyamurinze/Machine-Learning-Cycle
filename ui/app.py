@@ -618,6 +618,100 @@ def fetch_sample_bytes(label: str, filename: str) -> bytes | None:
         return None
 
 
+def render_prediction(
+    image_bytes: bytes,
+    filename: str,
+    true_label: str | None = None,
+    require_click: bool = False,
+) -> None:
+    """Classify one image and render the verdict, metrics and probabilities.
+
+    Extracted so the result can be rendered immediately beneath whichever
+    input the user actually used. Rendering it once at the bottom of the page
+    meant a click on an example scrolled the answer below the file uploader.
+    """
+    col_image, col_result = st.columns([1, 1.4])
+
+    with col_image:
+        st.image(image_bytes, caption=filename, width=260)
+        if true_label:
+            st.caption(f"True label: **{true_label}**")
+
+    with col_result:
+        if require_click and not st.button(
+            "Classify",
+            type="primary",
+            use_container_width=True,
+            icon=":material/biotech:",
+        ):
+            return
+
+        with st.spinner("Running inference…"):
+            result = api_post(
+                "/predict", files={"file": (filename, image_bytes, "image/png")}
+            )
+
+        if result is None:
+            return
+
+        label = result["prediction"]
+        confidence = result["confidence"]
+        infected = label == "Parasitized"
+
+        verdict_class = "verdict-positive" if infected else "verdict-negative"
+        verdict_sub = (
+            "Parasite detected in this cell" if infected else "No parasite detected"
+        )
+
+        st.markdown(
+            f'<div class="verdict {verdict_class}">'
+            f'<p class="verdict-title">{label}</p>'
+            f'<p class="verdict-sub">{verdict_sub}</p>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        if true_label:
+            if label == true_label:
+                st.success("Prediction matches the true label.",
+                           icon=":material/task_alt:")
+            else:
+                st.error("Prediction does not match the true label.",
+                         icon=":material/error:")
+
+        col_conf, col_lat = st.columns(2)
+        col_conf.metric("Confidence", f"{confidence:.2%}")
+        col_lat.metric("Latency", f"{result['latency_ms']:.0f} ms")
+
+        probabilities = result["probabilities"]
+        figure = go.Figure()
+        for class_name, probability in probabilities.items():
+            figure.add_trace(
+                go.Bar(
+                    x=[probability],
+                    y=[class_name],
+                    orientation="h",
+                    name=class_name,
+                    marker=dict(color=CLASS_COLORS[class_name], cornerradius=4),
+                    text=[f"{probability:.1%}"],
+                    textposition="outside",
+                )
+            )
+        figure.update_xaxes(range=[0, 1.15], tickformat=".0%")
+        st.plotly_chart(
+            style_axes(figure, "Class probabilities", "Probability", ""),
+            use_container_width=True,
+        )
+
+        if confidence < 0.75:
+            st.warning(
+                "Low confidence. This cell sits near the decision boundary, "
+                "likely an early-stage infection with a small parasite or an "
+                "artefact on the slide.",
+                icon=":material/help:",
+            )
+
+
 def page_predict() -> None:
     st.title("Predict")
     st.caption("Classify a single segmented red blood cell image.")
@@ -627,10 +721,6 @@ def page_predict() -> None:
     # and telling someone to open a local folder is useless in a browser.
     payload = api_get("/samples", quiet=True)
     sample_list = (payload or {}).get("samples", [])
-
-    chosen_bytes: bytes | None = None
-    chosen_name: str | None = None
-    chosen_truth: str | None = None
 
     if sample_list:
         st.markdown("#### Try an example")
@@ -642,9 +732,9 @@ def page_predict() -> None:
         columns = st.columns(len(sample_list))
         for column, entry in zip(columns, sample_list):
             with column:
-                image_bytes = fetch_sample_bytes(entry["label"], entry["filename"])
-                if image_bytes:
-                    st.image(image_bytes, use_container_width=True)
+                thumbnail = fetch_sample_bytes(entry["label"], entry["filename"])
+                if thumbnail:
+                    st.image(thumbnail, use_container_width=True)
                 st.caption(f"**{entry['label']}**")
                 if st.button(
                     "Classify",
@@ -653,12 +743,17 @@ def page_predict() -> None:
                     icon=":material/play_arrow:",
                 ):
                     st.session_state["sample_pick"] = entry
+                    st.session_state.pop("upload_pick", None)
 
+        # Result renders here, directly under the examples.
         picked = st.session_state.get("sample_pick")
         if picked:
-            chosen_bytes = fetch_sample_bytes(picked["label"], picked["filename"])
-            chosen_name = picked["filename"]
-            chosen_truth = picked["label"]
+            st.divider()
+            sample_bytes = fetch_sample_bytes(picked["label"], picked["filename"])
+            if sample_bytes:
+                render_prediction(
+                    sample_bytes, picked["filename"], true_label=picked["label"]
+                )
 
         st.divider()
 
@@ -668,99 +763,14 @@ def page_predict() -> None:
     )
 
     if uploaded is not None:
-        chosen_bytes = uploaded.getvalue()
-        chosen_name = uploaded.name
-        chosen_truth = None
         st.session_state.pop("sample_pick", None)
-
-    if chosen_bytes is None:
-        if not sample_list:
-            st.info(
-                "Upload a segmented red blood cell image to classify it.",
-                icon=":material/upload_file:",
-            )
-        return
-
-    st.divider()
-    col_image, col_result = st.columns([1, 1.4])
-
-    with col_image:
-        st.image(chosen_bytes, caption=chosen_name, width=260)
-        if chosen_truth:
-            st.caption(f"True label: **{chosen_truth}**")
-
-    with col_result:
-        # A sample was picked by pressing its own Classify button, so run
-        # immediately rather than demanding a second click.
-        run_now = chosen_truth is not None or st.button(
-            "Classify",
-            type="primary",
-            use_container_width=True,
-            icon=":material/biotech:",
+        st.divider()
+        render_prediction(uploaded.getvalue(), uploaded.name)
+    elif not sample_list:
+        st.info(
+            "Upload a segmented red blood cell image to classify it.",
+            icon=":material/upload_file:",
         )
-
-        if run_now:
-            with st.spinner("Running inference…"):
-                result = api_post(
-                    "/predict",
-                    files={"file": (chosen_name, chosen_bytes, "image/png")},
-                )
-
-            if result is None:
-                return
-
-            label = result["prediction"]
-            confidence = result["confidence"]
-            infected = label == "Parasitized"
-
-            verdict_class = "verdict-positive" if infected else "verdict-negative"
-            verdict_sub = (
-                "Parasite detected in this cell"
-                if infected
-                else "No parasite detected"
-            )
-
-            st.markdown(
-                f'<div class="verdict {verdict_class}">'
-                f'<p class="verdict-title">{label}</p>'
-                f'<p class="verdict-sub">{verdict_sub}</p>'
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-            col_conf, col_lat = st.columns(2)
-            col_conf.metric("Confidence", f"{confidence:.2%}")
-            col_lat.metric("Latency", f"{result['latency_ms']:.0f} ms")
-
-            probabilities = result["probabilities"]
-            figure = go.Figure()
-            for class_name, probability in probabilities.items():
-                figure.add_trace(
-                    go.Bar(
-                        x=[probability],
-                        y=[class_name],
-                        orientation="h",
-                        name=class_name,
-                        marker=dict(
-                            color=CLASS_COLORS[class_name],
-                            cornerradius=4,
-                        ),
-                        text=[f"{probability:.1%}"],
-                        textposition="outside",
-                    )
-                )
-            figure.update_xaxes(range=[0, 1.15], tickformat=".0%")
-            st.plotly_chart(
-                style_axes(figure, "Class probabilities", "Probability", ""),
-                use_container_width=True,
-            )
-
-            if confidence < 0.75:
-                st.warning(
-                    "Low confidence. This cell sits near the decision boundary "
-                    "— likely an early-stage infection with a small parasite, "
-                    "or an artefact on the slide."
-                )
 
 
 def page_retrain() -> None:
