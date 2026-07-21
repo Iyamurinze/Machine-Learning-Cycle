@@ -28,6 +28,8 @@ env/
 # --- Tooling -----------------------------------------------------------
 .DS_Store
 .env
+.idea/
+.DEMO.md
 
 # Locust reports are deliberately committed — they are the evidence for the
 # flood-request results quoted in the README, and total under 3 MB.
