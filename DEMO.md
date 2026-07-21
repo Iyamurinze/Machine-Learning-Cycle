@@ -78,18 +78,24 @@ because NIH's own cropping normalised the size difference away.
 
 ### 4. Prediction — REQUIRED (~90s)
 
-Open **Predict**.
+Open **Predict**. Six labelled example cells are shown at the top, served by
+the API itself — no files to hunt for.
 
-Do this **twice**, once per class, using files from `demo_images.txt`:
+Do this **twice**, once per class:
 
-1. Upload a **Parasitized** image → say the true label out loud *before*
-   clicking, then click **Classify**
+1. Point at a **Parasitized** example and say the true label out loud *before*
+   clicking, then press its **Classify** button
 2. Point at the result: predicted class, confidence, the probability bars,
    and the latency in milliseconds
-3. Repeat with an **Uninfected** image
+3. Repeat with an **Uninfected** example
 
-The listed demo images classify correctly at ~100% confidence, so this will
-land cleanly on camera.
+All six examples classify correctly — the Parasitized ones at 100.00%
+confidence, the Uninfected at ~99% — so this lands cleanly on camera.
+
+Then show the **upload path** too, since the rubric mentions inserting a data
+point: scroll to **Or upload your own** and upload any file from
+`data/test/` on your machine. `demo_images.txt` lists high-confidence
+candidates if you want a safe pick.
 
 **Optional but impressive:** upload one of the borderline cells and show a
 low-confidence result, then explain that the model's errors concentrate on

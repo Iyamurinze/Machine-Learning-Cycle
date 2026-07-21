@@ -45,6 +45,10 @@ COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser api/ ./api/
 COPY --chown=appuser:appuser models/ ./models/
 
+# Labelled example cells, so prediction is demonstrable on the hosted app
+# without the dataset. Small enough not to matter to the image size.
+COPY --chown=appuser:appuser data/samples/ ./data/samples/
+
 # Upload staging and the data directory must be writable at runtime.
 RUN mkdir -p data/uploads/Parasitized data/uploads/Uninfected data/train data/test \
     && chown -R appuser:appuser /app/data /app/models

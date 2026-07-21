@@ -606,34 +606,104 @@ def page_insights() -> None:
     )
 
 
+def fetch_sample_bytes(label: str, filename: str) -> bytes | None:
+    """Download one bundled example image from the API."""
+    try:
+        response = requests.get(
+            f"{API_URL}/samples/{label}/{filename}", timeout=REQUEST_TIMEOUT
+        )
+        response.raise_for_status()
+        return response.content
+    except requests.exceptions.RequestException:
+        return None
+
+
 def page_predict() -> None:
     st.title("Predict")
-    st.caption("Upload a single segmented red blood cell image for classification.")
+    st.caption("Classify a single segmented red blood cell image.")
 
+    # Example cells served by the API. Without these, a visitor to the hosted
+    # app has nothing to classify: the deployed container carries no dataset,
+    # and telling someone to open a local folder is useless in a browser.
+    payload = api_get("/samples", quiet=True)
+    sample_list = (payload or {}).get("samples", [])
+
+    chosen_bytes: bytes | None = None
+    chosen_name: str | None = None
+    chosen_truth: str | None = None
+
+    if sample_list:
+        st.markdown("#### Try an example")
+        st.caption(
+            "Real held-out cells the model never saw during training. "
+            "The true label is shown, so you can check the answer."
+        )
+
+        columns = st.columns(len(sample_list))
+        for column, entry in zip(columns, sample_list):
+            with column:
+                image_bytes = fetch_sample_bytes(entry["label"], entry["filename"])
+                if image_bytes:
+                    st.image(image_bytes, use_container_width=True)
+                st.caption(f"**{entry['label']}**")
+                if st.button(
+                    "Classify",
+                    key=f"sample_{entry['label']}_{entry['filename']}",
+                    use_container_width=True,
+                    icon=":material/play_arrow:",
+                ):
+                    st.session_state["sample_pick"] = entry
+
+        picked = st.session_state.get("sample_pick")
+        if picked:
+            chosen_bytes = fetch_sample_bytes(picked["label"], picked["filename"])
+            chosen_name = picked["filename"]
+            chosen_truth = picked["label"]
+
+        st.divider()
+
+    st.markdown("#### Or upload your own")
     uploaded = st.file_uploader(
         "Cell image", type=["png", "jpg", "jpeg"], accept_multiple_files=False
     )
 
-    if uploaded is None:
-        st.info(
-            "Pick any image from `data/test/Parasitized/` or "
-            "`data/test/Uninfected/` to try it — the file name tells you the "
-            "true label, so you can check the prediction is right."
-        )
+    if uploaded is not None:
+        chosen_bytes = uploaded.getvalue()
+        chosen_name = uploaded.name
+        chosen_truth = None
+        st.session_state.pop("sample_pick", None)
+
+    if chosen_bytes is None:
+        if not sample_list:
+            st.info(
+                "Upload a segmented red blood cell image to classify it.",
+                icon=":material/upload_file:",
+            )
         return
 
+    st.divider()
     col_image, col_result = st.columns([1, 1.4])
 
     with col_image:
-        st.image(uploaded, caption=uploaded.name, width=280)
+        st.image(chosen_bytes, caption=chosen_name, width=260)
+        if chosen_truth:
+            st.caption(f"True label: **{chosen_truth}**")
 
     with col_result:
-        if st.button("Classify", type="primary", use_container_width=True):
+        # A sample was picked by pressing its own Classify button, so run
+        # immediately rather than demanding a second click.
+        run_now = chosen_truth is not None or st.button(
+            "Classify",
+            type="primary",
+            use_container_width=True,
+            icon=":material/biotech:",
+        )
+
+        if run_now:
             with st.spinner("Running inference…"):
-                uploaded.seek(0)
                 result = api_post(
                     "/predict",
-                    files={"file": (uploaded.name, uploaded.getvalue(), "image/png")},
+                    files={"file": (chosen_name, chosen_bytes, "image/png")},
                 )
 
             if result is None:

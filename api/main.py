@@ -63,6 +63,10 @@ MIN_IMAGES_TO_RETRAIN = 20
 BASE_REPLAY_PER_CLASS = 750
 RETRAIN_SEED = 42
 
+# Labelled example cells bundled into the image so the hosted dashboard is
+# usable without the dataset.
+SAMPLES_DIR = PROJECT_ROOT / "data" / "samples"
+
 app = FastAPI(
     title="Malaria Cell Classification API",
     description=(
@@ -180,6 +184,55 @@ def status() -> dict:
         "retrain": retrain_job.snapshot(),
         "staged_uploads": count_uploads(),
     }
+
+
+@app.get("/samples")
+def samples() -> dict:
+    """List the bundled example cells.
+
+    The deployed container carries no dataset, so a user opening the hosted
+    dashboard has no images to try. A handful of labelled examples ship with
+    the image (~88 KB total) so prediction is demonstrable without cloning the
+    repository or downloading 353 MB from NIH.
+    """
+    if not SAMPLES_DIR.is_dir():
+        return {"samples": [], "count": 0}
+
+    entries = []
+    for class_name in CLASS_NAMES:
+        class_dir = SAMPLES_DIR / class_name
+        if not class_dir.is_dir():
+            continue
+        for path in sorted(class_dir.glob("*.png")):
+            entries.append(
+                {
+                    "label": class_name,
+                    "filename": path.name,
+                    "url": f"/samples/{class_name}/{path.name}",
+                }
+            )
+
+    return {"samples": entries, "count": len(entries)}
+
+
+@app.get("/samples/{label}/{filename}")
+def sample_image(label: str, filename: str):
+    """Serve one bundled example image."""
+    from fastapi.responses import FileResponse
+
+    if label not in CLASS_NAMES:
+        raise HTTPException(status_code=404, detail="Unknown label.")
+
+    # Reject any path trickery before touching the filesystem — the filename
+    # arrives straight from the URL.
+    if Path(filename).name != filename or not filename.lower().endswith(".png"):
+        raise HTTPException(status_code=400, detail="Invalid filename.")
+
+    path = SAMPLES_DIR / label / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Sample not found.")
+
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/metrics")
