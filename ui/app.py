@@ -671,14 +671,6 @@ def render_prediction(
             unsafe_allow_html=True,
         )
 
-        if true_label:
-            if label == true_label:
-                st.success("Prediction matches the true label.",
-                           icon=":material/task_alt:")
-            else:
-                st.error("Prediction does not match the true label.",
-                         icon=":material/error:")
-
         col_conf, col_lat = st.columns(2)
         col_conf.metric("Confidence", f"{confidence:.2%}")
         col_lat.metric("Latency", f"{result['latency_ms']:.0f} ms")
@@ -733,9 +725,17 @@ def page_predict() -> None:
         for column, entry in zip(columns, sample_list):
             with column:
                 thumbnail = fetch_sample_bytes(entry["label"], entry["filename"])
-                if thumbnail:
-                    st.image(thumbnail, use_container_width=True)
-                st.caption(f"**{entry['label']}**")
+                # Fixed-height box so every thumbnail occupies the same
+                # vertical space and the Classify buttons line up. The cells
+                # are cropped individually and differ slightly in aspect
+                # ratio, which otherwise staggers the whole row.
+                with st.container(height=150, border=False):
+                    if thumbnail:
+                        st.image(thumbnail, use_container_width=True)
+
+                # The true label is deliberately not shown here. Revealing it
+                # before classification gives the answer away; it appears with
+                # the result instead, where it serves as verification.
                 if st.button(
                     "Classify",
                     key=f"sample_{entry['label']}_{entry['filename']}",
