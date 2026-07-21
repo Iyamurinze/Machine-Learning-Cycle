@@ -3,13 +3,18 @@
 Detecting *Plasmodium falciparum* parasites in segmented red blood cell images,
 from raw data through to a deployed, load-tested, retrainable service.
 
-<!-- TODO: fill in before submission -->
 | | |
 |---|---|
-| **Live dashboard** | `TODO_UI_URL` |
-| **API + Swagger docs** | `TODO_API_URL/docs` |
+| **Live dashboard** | https://malaria-ui-7qn0.onrender.com |
+| **API** | https://malaria-api-t9ex.onrender.com |
+| **Swagger docs** | https://malaria-api-t9ex.onrender.com/docs |
 | **Video demo** | `TODO_YOUTUBE_URL` |
-| **Repository** | `TODO_GITHUB_URL` |
+| **Repository** | https://github.com/Iyamurinze/Machine-Learning-Cycle |
+
+> **Both services run on Render's free tier and spin down after 15 minutes of
+> inactivity.** The first request after a sleep takes 50–60 seconds while the
+> container restarts and TensorFlow loads; every request after that is fast.
+> If a page appears blank on first load, it is still waking — reload it.
 
 ---
 
@@ -60,7 +65,6 @@ cell, is it **Parasitized** or **Uninfected**?
 
 ## Results
 
-<!-- TODO: replace with the figures printed by the notebook -->
 
 ### Model performance on 5,512 held-out test images
 
@@ -231,7 +235,7 @@ with one command (below) — nothing is lost.
 Requires **Python 3.10** and, for the containerised path, Docker.
 
 ```bash
-git clone TODO_GITHUB_URL
+git clone https://github.com/Iyamurinze/Machine-Learning-Cycle.git
 cd Machine-Learning-Cycle
 
 python3 -m venv .venv
@@ -335,6 +339,31 @@ The deployed service exposes its own evaluation trail:
 
 Metrics are always measured against the same held-out test set, so figures
 remain comparable across versions.
+
+### Production verification
+
+Measured against the live Render deployment, posting real held-out test images
+over HTTPS:
+
+| True class | Predicted | Confidence | Latency |
+|---|---|---|---|
+| Parasitized | Parasitized | 0.9991 | 2,692 ms *(cold start)* |
+| Parasitized | Parasitized | 0.9997 | 596 ms |
+| Parasitized | Parasitized | 0.9969 | 507 ms |
+| Parasitized | Parasitized | 0.9985 | 550 ms |
+| Uninfected | Uninfected | 0.9769 | 486 ms |
+| Uninfected | Uninfected | 0.9672 | 438 ms |
+| Uninfected | Uninfected | 0.9852 | 481 ms |
+| Uninfected | Uninfected | 0.9818 | 475 ms |
+
+**8/8 correct.** The first request absorbs the cold-start cost of loading
+TensorFlow and the model; steady-state inference over the public internet runs
+around 480 ms, against ~55 ms measured locally. The difference is network
+round-trip plus the free tier's shared CPU.
+
+The live service reports `model_version: 2` — the retrained model, not the one
+the notebook produced — confirming the retraining pipeline's output is what is
+actually being served.
 
 ---
 

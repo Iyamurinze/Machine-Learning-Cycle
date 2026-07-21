@@ -39,13 +39,19 @@ services:
     envVars:
       - key: PORT
         value: 8501
-      # Wired to the API service by Render at deploy time. Note that
-      # `hostport` yields a bare "host:443" with no scheme, which `requests`
-      # rejects — so ui/app.py normalises a missing scheme rather than
-      # assuming this value is already a usable URL. See _resolve_api_url().
+      # Wired to the API service by Render at deploy time.
+      #
+      # Use `host`, not `hostport`. For a web service `hostport` yields the
+      # *internal* name and port — "malaria-api-xxxx:8000" — which does not
+      # resolve from another container and fails with NameResolutionError.
+      # `host` returns the public hostname, "malaria-api-xxxx.onrender.com".
+      #
+      # Either way the value carries no scheme, so ui/app.py fills one in
+      # rather than assuming this is already a usable URL. See
+      # _resolve_api_url().
       - key: API_URL
         fromService:
           name: malaria-api
           type: web
-          property: hostport
+          property: host
     autoDeploy: true
