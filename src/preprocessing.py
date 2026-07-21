@@ -256,6 +256,47 @@ def has_local_images(train_dir: Path = TRAIN_DIR) -> bool:
     )
 
 
+# A small train/test pair shipped inside the container.
+#
+# The full 27k dataset is deliberately excluded from the image, but retraining
+# still needs two things from it: original images to replay so fine-tuning
+# does not catastrophically forget the baseline, and a held-out set to
+# evaluate the result. Without these the retrain endpoint trains on the
+# uploaded batch alone and then dies trying to evaluate against a directory
+# that does not exist.
+#
+# 300 images per class per split, disjoint from each other and from the
+# prediction samples. ~16 MB.
+BUNDLED_TRAIN_DIR = DATA_DIR / "bundled" / "train"
+BUNDLED_TEST_DIR = DATA_DIR / "bundled" / "test"
+
+
+def _has_images(directory: Path) -> bool:
+    return any(
+        (Path(directory) / class_name).is_dir()
+        and any((Path(directory) / class_name).glob("*.png"))
+        for class_name in CLASS_NAMES
+    )
+
+
+def resolve_train_dir() -> Path | None:
+    """Training images to replay: the full dataset if present, else bundled."""
+    if _has_images(TRAIN_DIR):
+        return TRAIN_DIR
+    if _has_images(BUNDLED_TRAIN_DIR):
+        return BUNDLED_TRAIN_DIR
+    return None
+
+
+def resolve_test_dir() -> Path | None:
+    """Evaluation images: the full held-out set if present, else bundled."""
+    if _has_images(TEST_DIR):
+        return TEST_DIR
+    if _has_images(BUNDLED_TEST_DIR):
+        return BUNDLED_TEST_DIR
+    return None
+
+
 def build_feature_table(
     directories: Iterable[Path] | None = None,
     per_class: int | None = 1500,

@@ -528,6 +528,34 @@ evaluation on the full 5,512-image test set and hot-swapping the live model.
 Both versions are retained in `models/metadata.json` and charted by model
 version on the dashboard's Overview page.
 
+### Retraining on the deployed container
+
+The container ships without the 27,558-image dataset — it is a gigabyte, and a
+serving image has no use for it. But retraining needs two things from that
+dataset: original images to replay so fine-tuning does not catastrophically
+forget the baseline, and a held-out set to score the result. Without them the
+endpoint trains on the uploaded batch alone and then fails trying to evaluate
+against a directory that does not exist.
+
+So a small disjoint subset is bundled into the image (~16 MB):
+
+| Bundled set | Size | Purpose |
+|---|---|---|
+| `data/samples/` | 50 images | Prediction examples + downloadable retrain archive |
+| `data/bundled/train/` | 600 images | Baseline replay during fine-tuning |
+| `data/bundled/test/` | 600 images | Scoring the retrained model |
+
+All three are mutually disjoint, and the bundled test images are excluded from
+the replay pool, so the evaluation stays genuinely held out.
+
+A full retrain in the container completes in **44 seconds** and is recorded as
+v3 in the metadata trail. **Its 97.17% is measured against the 600-image
+bundled set, not the 5,512-image test set used for v1 and v2** — a smaller
+sample, so the figure is not directly comparable to the earlier two. Every
+entry in `models/metadata.json` records `evaluated_on` and
+`evaluation_source`, so which set produced which number is always recoverable
+rather than assumed.
+
 ---
 
 ## Design decisions

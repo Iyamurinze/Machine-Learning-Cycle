@@ -187,23 +187,28 @@ def status() -> dict:
 
 
 @app.get("/samples")
-def samples() -> dict:
+def samples(limit_per_class: int = 3) -> dict:
     """List the bundled example cells.
 
     The deployed container carries no dataset, so a user opening the hosted
-    dashboard has no images to try. A handful of labelled examples ship with
-    the image (~88 KB total) so prediction is demonstrable without cloning the
+    dashboard has no images to try. Labelled examples ship with the image so
+    both prediction and retraining are demonstrable without cloning the
     repository or downloading 353 MB from NIH.
+
+    `limit_per_class` caps how many are listed — the prediction page wants a
+    handful of thumbnails, not all 50.
     """
     if not SAMPLES_DIR.is_dir():
-        return {"samples": [], "count": 0}
+        return {"samples": [], "count": 0, "available": 0}
 
-    entries = []
+    entries, available = [], 0
     for class_name in CLASS_NAMES:
         class_dir = SAMPLES_DIR / class_name
         if not class_dir.is_dir():
             continue
-        for path in sorted(class_dir.glob("*.png")):
+        paths = sorted(class_dir.glob("*.png"))
+        available += len(paths)
+        for path in paths[: max(1, limit_per_class)]:
             entries.append(
                 {
                     "label": class_name,
@@ -212,7 +217,54 @@ def samples() -> dict:
                 }
             )
 
-    return {"samples": entries, "count": len(entries)}
+    return {"samples": entries, "count": len(entries), "available": available}
+
+
+@app.get("/samples/archive")
+def samples_archive(per_class: int = 25):
+    """Build a labelled ZIP of bundled cells, ready to upload for retraining.
+
+    This is what makes the retraining flow demonstrable on the hosted app.
+    Generating the archive from `data/test/` on the local filesystem — as an
+    earlier version of the dashboard did — cannot work in the deployed
+    container, which ships no dataset.
+
+    The archive uses the `Parasitized/` + `Uninfected/` folder layout that
+    POST /upload expects, so it round-trips through the pipeline unmodified.
+    """
+    import io
+    import zipfile
+
+    from fastapi.responses import StreamingResponse
+
+    if not SAMPLES_DIR.is_dir():
+        raise HTTPException(status_code=404, detail="No bundled samples available.")
+
+    per_class = max(1, min(per_class, 100))
+    buffer = io.BytesIO()
+    written = 0
+
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for class_name in CLASS_NAMES:
+            class_dir = SAMPLES_DIR / class_name
+            if not class_dir.is_dir():
+                continue
+            for path in sorted(class_dir.glob("*.png"))[:per_class]:
+                archive.write(path, f"{class_name}/{path.name}")
+                written += 1
+
+    if written == 0:
+        raise HTTPException(status_code=404, detail="No sample images found.")
+
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": 'attachment; filename="retrain_batch.zip"',
+            "X-Image-Count": str(written),
+        },
+    )
 
 
 @app.get("/samples/{label}/{filename}")
@@ -483,7 +535,17 @@ def _run_retraining(epochs: int, learning_rate: float, include_base_data: bool) 
         import tempfile
 
         from src.model import evaluate, retrain, write_metadata
-        from src.preprocessing import TRAIN_DIR, build_datasets, build_test_dataset
+        from src.preprocessing import (
+            build_datasets,
+            build_test_dataset,
+            resolve_test_dir,
+            resolve_train_dir,
+        )
+
+        # Falls back to the images bundled in the container when the full
+        # dataset is absent, which is always the case in deployment.
+        base_dir_root = resolve_train_dir()
+        test_dir_root = resolve_test_dir()
 
         staged = count_uploads()
         if sum(staged.values()) < MIN_IMAGES_TO_RETRAIN:
@@ -521,8 +583,8 @@ def _run_retraining(epochs: int, learning_rate: float, include_base_data: bool) 
                             shutil.copy2(image, corpus / class_name / image.name)
                             written += 1
 
-                if include_base_data:
-                    base_dir = TRAIN_DIR / class_name
+                if include_base_data and base_dir_root is not None:
+                    base_dir = base_dir_root / class_name
                     if base_dir.is_dir():
                         base_images = [p for p in base_dir.iterdir() if p.is_file()]
                         if len(base_images) > BASE_REPLAY_PER_CLASS:
@@ -544,7 +606,18 @@ def _run_retraining(epochs: int, learning_rate: float, include_base_data: bool) 
                 train_ds, val_ds, epochs=epochs, learning_rate=learning_rate
             )
 
-            scores = evaluate(model, build_test_dataset())
+            if test_dir_root is None:
+                retrain_job.finish(
+                    "failed",
+                    "Retraining ran but no evaluation set is available, so the "
+                    "result cannot be scored. The model was not swapped in.",
+                )
+                return
+
+            scores = evaluate(model, build_test_dataset(test_dir=test_dir_root))
+            evaluated_on = sum(
+                len(list((test_dir_root / c).glob("*.png"))) for c in CLASS_NAMES
+            )
 
         write_metadata(
             scores,
@@ -554,6 +627,9 @@ def _run_retraining(epochs: int, learning_rate: float, include_base_data: bool) 
                 "learning_rate": learning_rate,
                 "new_images": staged,
                 "included_base_data": include_base_data,
+                "base_replay_source": str(base_dir_root) if base_dir_root else None,
+                "evaluated_on": evaluated_on,
+                "evaluation_source": str(test_dir_root),
             },
         )
 

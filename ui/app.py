@@ -821,47 +821,44 @@ def page_retrain() -> None:
                 st.json(result["saved"])
                 st.rerun()
 
-        with st.expander("Build a test archive from the existing test set"):
+        with st.expander("Don't have a ZIP? Download a ready-made one"):
             st.markdown(
-                "Generates a small labelled ZIP from images the model was "
-                "never trained on — useful for demonstrating the flow."
+                "Builds a labelled archive from cells bundled with the API — "
+                "real held-out images the model was never trained on. Download "
+                "it, then upload it above to run the retraining flow."
             )
+
             per_class = st.number_input(
-                "Images per class", min_value=10, max_value=200, value=25, step=5
+                "Images per class", min_value=10, max_value=25, value=25, step=5
             )
-            if st.button("Generate archive"):
-                from pathlib import Path
 
-                test_dir = Path(__file__).resolve().parents[1] / "data" / "test"
-                if not test_dir.is_dir():
-                    st.error(
-                        "No `data/test/` directory found. Run "
-                        "`python src/data_acquisition.py` first."
-                    )
+            # Served by the API rather than assembled from the local
+            # filesystem. The deployed dashboard ships no dataset, so reading
+            # data/test/ here would fail on the hosted app.
+            archive_bytes = None
+            try:
+                response = requests.get(
+                    f"{API_URL}/samples/archive",
+                    params={"per_class": int(per_class)},
+                    timeout=REQUEST_TIMEOUT,
+                )
+                if response.ok:
+                    archive_bytes = response.content
+                    image_count = response.headers.get("X-Image-Count", "?")
                 else:
-                    buffer = io.BytesIO()
-                    written = 0
-                    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-                        for class_name in CLASS_COLORS:
-                            class_dir = test_dir / class_name
-                            if not class_dir.is_dir():
-                                continue
-                            images = sorted(class_dir.glob("*.png"))[: int(per_class)]
-                            for image in images:
-                                archive.write(
-                                    image, f"{class_name}/{image.name}"
-                                )
-                                written += 1
+                    st.error(f"Could not build the archive — {response.status_code}")
+            except requests.exceptions.RequestException as error:
+                st.error(f"Could not reach the API — {error}")
 
-                    if written:
-                        st.download_button(
-                            f"Download archive ({written} images)",
-                            data=buffer.getvalue(),
-                            file_name="retrain_batch.zip",
-                            mime="application/zip",
-                        )
-                    else:
-                        st.error("No images found in the test directory.")
+            if archive_bytes:
+                st.download_button(
+                    f"Download retrain_batch.zip ({image_count} images)",
+                    data=archive_bytes,
+                    file_name="retrain_batch.zip",
+                    mime="application/zip",
+                    icon=":material/download:",
+                    use_container_width=True,
+                )
 
     with tab_images:
         label = st.selectbox("Label for these images", list(CLASS_COLORS))

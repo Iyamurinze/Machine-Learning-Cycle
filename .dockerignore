@@ -4,10 +4,14 @@
 data/
 !data/.gitkeep
 
-# ...except the bundled example cells. They are ~88 KB and are what makes the
-# hosted dashboard usable without the dataset.
+# ...except the bundled subsets, which are what make the hosted app work
+# without the dataset: example cells for prediction (~700 KB) and a small
+# train/test pair so retraining can replay baseline images and score its
+# result (~16 MB).
 !data/samples/
 !data/samples/**
+!data/bundled/
+!data/bundled/**
 
 # Training checkpoints are a training artefact — the serving image needs only
 # the final model and its metadata.
