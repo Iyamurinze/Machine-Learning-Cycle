@@ -927,7 +927,7 @@ def page_retrain() -> None:
                 "Uploading and preprocessing work here. Run the retraining "
                 "itself locally with `uvicorn api.main:app`, or on an instance "
                 "with at least 1 GB.",
-                icon=":material/memory_alert:",
+                icon=":material/memory:",
             )
         elif memory.get("retrain_fits"):
             st.caption("Sufficient memory available to retrain on this instance.")
@@ -935,7 +935,7 @@ def page_retrain() -> None:
         st.warning(
             "This instance is configured as memory-constrained; retraining "
             "may not complete. Run it locally if it fails.",
-            icon=":material/memory_alert:",
+            icon=":material/memory:",
         )
 
     col_epochs, col_lr = st.columns(2)
