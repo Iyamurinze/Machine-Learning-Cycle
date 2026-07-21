@@ -21,6 +21,8 @@ predictions the whole time.
 
 from __future__ import annotations
 
+import gc
+import os
 import random
 import sys
 import threading
@@ -60,8 +62,31 @@ MIN_IMAGES_TO_RETRAIN = 20
 # How many original training images per class to replay alongside the new
 # uploads. Enough to anchor the baseline distribution without making a
 # retrain as expensive as training from scratch.
-BASE_REPLAY_PER_CLASS = 750
+BASE_REPLAY_PER_CLASS = int(os.getenv("BASE_REPLAY_PER_CLASS", "750"))
 RETRAIN_SEED = 42
+
+# Memory-lean retraining.
+#
+# A free Render instance has 512 MB total. TensorFlow idles near 280 MB of
+# that, so a default-configuration retrain (batch 64, cached dataset) is
+# OOM-killed by the platform mid-run — the process dies instantly and cannot
+# even report the failure. These settings trade throughput for footprint.
+#
+# Set LOW_MEMORY=0 on a larger instance to restore the faster defaults.
+LOW_MEMORY = os.getenv("LOW_MEMORY", "0").lower() in {"1", "true", "yes"}
+
+# Additional memory a retrain needs beyond the resting footprint.
+#
+# Calibrated against a real OOM rather than guessed. Under a 512 MB cap the
+# service rests at ~265 MB free after loading the model, and a retrain there
+# is still killed (exit 137) even at batch size 8 with caching disabled — so
+# the true requirement is above 265 MB. 400 MB is set as a deliberately
+# conservative floor: the cost of refusing a job that might just have fitted
+# is a clear error message, while the cost of allowing one that does not is
+# the whole service being killed and restarted mid-run.
+RETRAIN_MEMORY_ESTIMATE_MB = int(os.getenv("RETRAIN_MEMORY_ESTIMATE_MB", "400"))
+RETRAIN_BATCH_SIZE = int(os.getenv("RETRAIN_BATCH_SIZE", "16" if LOW_MEMORY else "64"))
+EVAL_BATCH_SIZE = int(os.getenv("EVAL_BATCH_SIZE", "16" if LOW_MEMORY else "64"))
 
 # Labelled example cells bundled into the image so the hosted dashboard is
 # usable without the dataset.
@@ -162,6 +187,54 @@ def health() -> dict:
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
+def read_memory() -> dict:
+    """Report the container's memory limit and current usage.
+
+    Read from the cgroup rather than the host, so the numbers reflect what the
+    platform will actually enforce. Falls back gracefully off-container, where
+    no limit applies.
+
+    This exists because an out-of-memory kill is invisible from inside: the
+    process is terminated instantly and cannot log, report, or fail
+    gracefully. Publishing headroom is the only way the service can warn about
+    a limit before hitting it.
+    """
+    def _read(path: str) -> int | None:
+        try:
+            value = Path(path).read_text().strip()
+            return None if value in {"max", ""} else int(value)
+        except (OSError, ValueError):
+            return None
+
+    # cgroup v2 first, then v1.
+    limit = _read("/sys/fs/cgroup/memory.max") or _read(
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+    )
+    used = _read("/sys/fs/cgroup/memory.current") or _read(
+        "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+    )
+
+    # A "limit" in the exabyte range means unlimited, not a real cap.
+    if limit is not None and limit > (1 << 50):
+        limit = None
+
+    info: dict = {
+        "limit_mb": round(limit / 1e6, 1) if limit else None,
+        "used_mb": round(used / 1e6, 1) if used else None,
+    }
+
+    if limit and used:
+        info["free_mb"] = round((limit - used) / 1e6, 1)
+        info["used_percent"] = round(used / limit * 100, 1)
+
+        # Measured: importing TensorFlow and serving one prediction settles
+        # around 260 MB, and a retrain needs roughly 250 MB beyond that.
+        info["retrain_headroom_mb"] = RETRAIN_MEMORY_ESTIMATE_MB
+        info["retrain_fits"] = (limit - used) / 1e6 > RETRAIN_MEMORY_ESTIMATE_MB
+
+    return info
+
+
 @app.get("/status")
 def status() -> dict:
     """Uptime and live-model information for the dashboard."""
@@ -183,6 +256,13 @@ def status() -> dict:
         "last_training_event": metadata.get("latest"),
         "retrain": retrain_job.snapshot(),
         "staged_uploads": count_uploads(),
+        # Surfaced so the dashboard can warn before a user triggers a job the
+        # instance cannot survive. On a 512 MB host the retrain is OOM-killed
+        # by the platform mid-run: the process dies instantly, so it can never
+        # report its own failure and the job simply appears to reset.
+        "low_memory": LOW_MEMORY,
+        "retrain_supported": not LOW_MEMORY,
+        "memory": read_memory(),
     }
 
 
@@ -601,10 +681,20 @@ def _run_retraining(epochs: int, learning_rate: float, include_base_data: bool) 
 
             print(f"[retrain] training corpus: {corpus_counts}", flush=True)
 
-            train_ds, val_ds = build_datasets(train_dir=corpus)
+            train_ds, val_ds = build_datasets(
+                train_dir=corpus,
+                batch_size=RETRAIN_BATCH_SIZE,
+                cache=not LOW_MEMORY,
+            )
             model, _ = retrain(
                 train_ds, val_ds, epochs=epochs, learning_rate=learning_rate
             )
+
+            # Release the training pipeline before evaluation. Under a hard
+            # memory cap the two phases otherwise overlap at peak and the
+            # container is killed between them.
+            del train_ds, val_ds
+            gc.collect()
 
             if test_dir_root is None:
                 retrain_job.finish(
@@ -614,7 +704,12 @@ def _run_retraining(epochs: int, learning_rate: float, include_base_data: bool) 
                 )
                 return
 
-            scores = evaluate(model, build_test_dataset(test_dir=test_dir_root))
+            scores = evaluate(
+                model,
+                build_test_dataset(
+                    test_dir=test_dir_root, batch_size=EVAL_BATCH_SIZE
+                ),
+            )
             evaluated_on = sum(
                 len(list((test_dir_root / c).glob("*.png"))) for c in CLASS_NAMES
             )
@@ -662,6 +757,25 @@ def trigger_retrain(
                 f"Not enough staged data to retrain. Found {staged_total} "
                 f"image(s), need at least {MIN_IMAGES_TO_RETRAIN}. "
                 "Upload more data first."
+            ),
+        )
+
+    # Refuse rather than let the platform OOM-kill the container mid-run. A
+    # kill takes the whole service down, wipes staged uploads, and cannot be
+    # reported — the job just appears to reset. A clear 507 is far better than
+    # a silent restart.
+    memory = read_memory()
+    if memory.get("retrain_fits") is False:
+        raise HTTPException(
+            status_code=507,
+            detail=(
+                f"Not enough memory to retrain. This instance has "
+                f"{memory['limit_mb']:.0f} MB with {memory['free_mb']:.0f} MB "
+                f"free; retraining needs roughly "
+                f"{memory['retrain_headroom_mb']} MB beyond current usage. "
+                "Starting anyway would be killed by the platform partway "
+                "through and restart the service. Run retraining locally, or "
+                "use an instance with at least 1 GB."
             ),
         )
 

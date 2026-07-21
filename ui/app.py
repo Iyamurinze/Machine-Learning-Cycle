@@ -889,6 +889,55 @@ def page_retrain() -> None:
     st.divider()
     st.subheader("2. Trigger retraining")
 
+    # The hosted instance has 512 MB; TensorFlow plus the loaded model already
+    # occupies ~260 MB of it, and training exceeds what remains. The platform
+    # kills the process outright, so the job cannot report its own failure —
+    # it just appears to reset. Warn rather than let someone discover that by
+    # clicking.
+    service_status = api_get("/status", quiet=True) or {}
+    memory = service_status.get("memory") or {}
+
+    if memory.get("limit_mb"):
+        st.markdown("**Instance memory**")
+        col_lim, col_used, col_free = st.columns(3)
+        col_lim.metric("Limit", f"{memory['limit_mb']:.0f} MB")
+        col_used.metric(
+            "In use",
+            f"{memory['used_mb']:.0f} MB",
+            f"{memory.get('used_percent', 0):.0f}% of limit",
+            delta_color="off",
+        )
+        col_free.metric(
+            "Free",
+            f"{memory.get('free_mb', 0):.0f} MB",
+            f"retrain needs ~{memory.get('retrain_headroom_mb', 250)} MB",
+            delta_color="off",
+        )
+
+        if memory.get("retrain_fits") is False:
+            st.error(
+                f"**Not enough memory to retrain on this instance.** "
+                f"{memory['limit_mb']:.0f} MB total, {memory['free_mb']:.0f} MB "
+                f"free, and retraining needs roughly "
+                f"{memory.get('retrain_headroom_mb', 250)} MB more.\n\n"
+                "Importing TensorFlow alone accounts for most of the footprint, "
+                "and it cannot be released — clearing caches or unloading the "
+                "model reclaims almost nothing, because the cost is the "
+                "framework's runtime rather than cached data.\n\n"
+                "Uploading and preprocessing work here. Run the retraining "
+                "itself locally with `uvicorn api.main:app`, or on an instance "
+                "with at least 1 GB.",
+                icon=":material/memory_alert:",
+            )
+        elif memory.get("retrain_fits"):
+            st.caption("Sufficient memory available to retrain on this instance.")
+    elif service_status.get("low_memory"):
+        st.warning(
+            "This instance is configured as memory-constrained; retraining "
+            "may not complete. Run it locally if it fails.",
+            icon=":material/memory_alert:",
+        )
+
     col_epochs, col_lr = st.columns(2)
     epochs = col_epochs.slider("Epochs", 1, 20, 5)
     learning_rate = col_lr.select_slider(

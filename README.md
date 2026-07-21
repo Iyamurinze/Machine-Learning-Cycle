@@ -327,6 +327,45 @@ dashboard's `API_URL` wired to the API automatically.
 roughly 30–60 seconds, most of it TensorFlow importing. Wake the service before
 demoing or load-testing.
 
+### Retraining does not fit on the free tier
+
+Prediction, upload, preprocessing, visualisations and metrics all work on the
+hosted service. **Retraining does not**, and the reason is a hard limit rather
+than a tuning problem:
+
+| | |
+|---|---|
+| Free instance memory | 512 MB |
+| TensorFlow + loaded model, at rest | ~260 MB |
+| Remaining for training | ~250 MB |
+
+Training exceeds what remains, so the platform kills the container mid-run.
+Verified under an identical cap locally (`docker run --memory=512m`):
+`OOMKilled=true, exit=137`.
+
+This was tested down to the most aggressive configuration the pipeline
+supports — batch size 8, dataset caching disabled, 100 replay images per
+class, a single epoch, one TensorFlow thread — and it still dies. The floor is
+the framework itself, not the workload.
+
+Because an OOM kill terminates the process instantly, the job cannot report
+its own failure; it simply appears to reset to `idle`. So the API advertises
+the constraint via `low_memory` on `GET /status`, and the dashboard shows a
+warning on the retraining page rather than letting anyone discover this by
+clicking.
+
+**To run retraining:**
+
+- **Locally** — `uvicorn api.main:app` on any machine with ~2 GB free. Takes
+  under two minutes end to end.
+- **On a larger instance** — set `LOW_MEMORY=0` in `render.yaml` and use a
+  plan with at least 1 GB.
+
+The memory-lean settings (`LOW_MEMORY`, `RETRAIN_BATCH_SIZE`,
+`BASE_REPLAY_PER_CLASS`) are retained because they are what make retraining
+viable on a 1 GB instance, where the default configuration would also
+struggle.
+
 ### Evaluating the model in production
 
 The deployed service exposes its own evaluation trail:

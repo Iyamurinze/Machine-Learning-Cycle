@@ -26,6 +26,17 @@ services:
       # core causes contention rather than speedup on a shared vCPU.
       - key: OMP_NUM_THREADS
         value: "2"
+      # Free tier is 512 MB. TensorFlow plus the loaded model occupies ~260 MB
+      # of that, and retraining needs more than the remainder — the platform
+      # OOM-kills the container mid-run (verified: exit 137). This flag makes
+      # the dashboard say so up front instead of letting a user trigger a job
+      # that silently restarts the service.
+      #
+      # Set to "0" on an instance with 1 GB or more to enable retraining.
+      - key: LOW_MEMORY
+        value: "1"
+      - key: BASE_REPLAY_PER_CLASS
+        value: "300"
     autoDeploy: true
 
   - type: web

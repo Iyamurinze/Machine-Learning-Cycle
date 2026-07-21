@@ -51,6 +51,7 @@ def build_datasets(
     validation_split: float = 0.2,
     batch_size: int = 64,
     seed: int = 42,
+    cache: bool = True,
 ):
     """Build shuffled, prefetched train/validation datasets from a directory.
 
@@ -58,6 +59,11 @@ def build_datasets(
     pixels left in [0, 255] — rescaling happens inside the model so that the
     exact same normalization is applied at serving time without the API
     having to remember to do it.
+
+    `cache=False` keeps the decoded images out of memory, trading throughput
+    for footprint. Training locally wants the cache; retraining inside a
+    512 MB container cannot afford it, since the cache holds every decoded
+    image resident for the whole run.
     """
     import tensorflow as tf
 
@@ -78,9 +84,18 @@ def build_datasets(
     )
 
     autotune = tf.data.AUTOTUNE
+
+    if cache:
+        train_ds = train_ds.cache()
+        val_ds = val_ds.cache()
+
+    # A shuffle buffer also holds decoded images resident, so it is sized to
+    # the batch rather than a flat 1000 when running lean.
+    shuffle_buffer = 1000 if cache else batch_size * 4
+
     return (
-        train_ds.cache().shuffle(1000, seed=seed).prefetch(autotune),
-        val_ds.cache().prefetch(autotune),
+        train_ds.shuffle(shuffle_buffer, seed=seed).prefetch(autotune),
+        val_ds.prefetch(autotune),
     )
 
 
