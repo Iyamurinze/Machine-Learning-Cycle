@@ -213,6 +213,49 @@ def extract_features(source: str | Path | Image.Image) -> dict[str, float]:
     }
 
 
+# Precomputed feature distributions, shipped next to the model.
+#
+# The deployed container deliberately does not carry the 27k-image dataset —
+# it is a gigabyte, and a serving image has no use for it. But the dashboard's
+# insight charts describe that dataset, so the derived features are computed
+# once here and committed. This also makes the endpoint instant rather than
+# sweeping hundreds of images per request.
+FEATURE_TABLE_PATH = PROJECT_ROOT / "models" / "feature_table.csv"
+
+
+def export_feature_table(
+    destination: Path = FEATURE_TABLE_PATH,
+    per_class: int = 1500,
+    seed: int = 42,
+):
+    """Compute the feature table from local images and persist it to CSV."""
+    frame = build_feature_table(per_class=per_class, seed=seed)
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(destination, index=False)
+    print(f"[features] wrote {len(frame):,} rows to {destination}")
+    return frame
+
+
+def load_feature_table(source: Path = FEATURE_TABLE_PATH):
+    """Load the precomputed feature table, or None if it has not been built."""
+    import pandas as pd
+
+    source = Path(source)
+    if not source.exists():
+        return None
+    return pd.read_csv(source)
+
+
+def has_local_images(train_dir: Path = TRAIN_DIR) -> bool:
+    """Whether raw training images are present on this machine."""
+    return any(
+        (Path(train_dir) / class_name).is_dir()
+        and any((Path(train_dir) / class_name).glob("*.png"))
+        for class_name in CLASS_NAMES
+    )
+
+
 def build_feature_table(
     directories: Iterable[Path] | None = None,
     per_class: int | None = 1500,

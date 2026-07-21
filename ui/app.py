@@ -73,23 +73,123 @@ FEATURE_LABELS = {
 
 st.set_page_config(
     page_title="Malaria Cell Classifier",
-    page_icon="🔬",
+    page_icon=":material/biotech:",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
+
+# Presentation layer.
+#
+# Icons come from Streamlit's built-in Material Symbols (`:material/name:`)
+# rather than emoji. Emoji render differently on every platform, carry a
+# cartoon tone at odds with a diagnostic tool, and cannot be colour-matched to
+# the interface. Material Symbols are vectors that inherit the current text
+# colour and stay legible at small sizes.
+CUSTOM_CSS = """
+<style>
+  /* Tighten the default vertical rhythm — Streamlit ships very loose. */
+  .block-container { padding-top: 2.5rem; max-width: 1400px; }
+
+  h1 { font-weight: 650; letter-spacing: -0.02em; }
+  h2 { font-weight: 600; letter-spacing: -0.01em; margin-top: 0.4rem; }
+  h3 { font-weight: 600; font-size: 1.05rem; }
+
+  /* Metric cards: a hairline border reads as structure without the visual
+     weight of a filled panel. */
+  div[data-testid="stMetric"] {
+    background: color-mix(in srgb, currentColor 3%, transparent);
+    border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+  }
+  div[data-testid="stMetricLabel"] p {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    opacity: 0.65;
+  }
+  div[data-testid="stMetricValue"] {
+    font-size: 1.55rem;
+    font-weight: 620;
+    letter-spacing: -0.01em;
+  }
+
+  /* Status pill: a dot plus a word, so state is never colour-alone. */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.86rem;
+    font-weight: 550;
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+  }
+  .dot-live  { background: #12a150; color: #12a150; }
+  .dot-down  { background: #d03b3b; color: #d03b3b; }
+  .dot-idle  { background: #9a9a9a; color: #9a9a9a; }
+
+  /* Prediction verdict card. */
+  .verdict {
+    border-radius: 12px;
+    padding: 1.15rem 1.3rem;
+    border: 1px solid;
+    margin-bottom: 0.5rem;
+  }
+  .verdict-title {
+    font-size: 1.35rem; font-weight: 650;
+    letter-spacing: -0.01em; margin: 0 0 0.15rem 0;
+  }
+  .verdict-sub { font-size: 0.85rem; opacity: 0.75; margin: 0; }
+  .verdict-positive {
+    border-color: color-mix(in srgb, #d03b3b 45%, transparent);
+    background: color-mix(in srgb, #d03b3b 10%, transparent);
+  }
+  .verdict-negative {
+    border-color: color-mix(in srgb, #12a150 45%, transparent);
+    background: color-mix(in srgb, #12a150 10%, transparent);
+  }
+
+  /* Sidebar nav: quieter label, roomier hit targets. */
+  section[data-testid="stSidebar"] .stRadio label { padding: 0.15rem 0; }
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+def status_pill(label: str, state: str = "live") -> str:
+    """Render a status pill. `state` is one of live / down / idle."""
+    return (
+        f'<span class="status-pill">'
+        f'<span class="status-dot dot-{state}"></span>{label}</span>'
+    )
 
 
 # ---------------------------------------------------------------------------
 # API helpers
 # ---------------------------------------------------------------------------
 
-def api_get(path: str, **kwargs):
-    """GET from the API, returning None and showing an error on failure."""
+def api_get(path: str, quiet: bool = False, **kwargs):
+    """GET from the API, returning None on failure.
+
+    `quiet` suppresses the inline error banner, for callers that render their
+    own failure state — the sidebar health check shows a status pill, and a
+    stacked error message underneath it would be redundant noise.
+    """
     try:
         response = requests.get(f"{API_URL}{path}", timeout=REQUEST_TIMEOUT, **kwargs)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as error:
-        st.error(f"Could not reach the API at `{API_URL}{path}` — {error}")
+        if not quiet:
+            st.error(
+                f"Could not reach the API at `{API_URL}{path}` — {error}",
+                icon=":material/cloud_off:",
+            )
         return None
 
 
@@ -139,7 +239,7 @@ def style_axes(figure: go.Figure, title: str, x_title: str, y_title: str) -> go.
 # ---------------------------------------------------------------------------
 
 def page_overview() -> None:
-    st.title("🔬 Malaria Cell Classifier")
+    st.title("Malaria Cell Classifier")
     st.caption(
         "Detecting *Plasmodium* parasites in segmented red blood cell images — "
         "NIH dataset, 27,558 images, balanced across two classes."
@@ -150,25 +250,31 @@ def page_overview() -> None:
         st.warning(
             f"The API is not responding. Start it with "
             f"`uvicorn api.main:app --reload` or check `API_URL` (currently "
-            f"`{API_URL}`)."
+            f"`{API_URL}`).",
+            icon=":material/cloud_off:",
         )
         return
 
-    st.subheader("Service status")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Status", "🟢 Online" if status["status"] == "online" else "🔴 Offline")
-    col2.metric("Uptime", status["uptime_human"])
-    col3.metric("Model version", f"v{status['model_version']}")
-    col4.metric(
-        "Model file",
-        "✅ Loaded" if status["model_available"] else "❌ Missing",
+    online = status["status"] == "online"
+
+    st.markdown("### Service status")
+    st.markdown(
+        status_pill("Online" if online else "Offline", "live" if online else "down"),
+        unsafe_allow_html=True,
     )
+    st.write("")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Uptime", status["uptime_human"])
+    col2.metric("Model version", f"v{status['model_version']}")
+    col3.metric("Model file", "Loaded" if status["model_available"] else "Missing")
 
     staged = status.get("staged_uploads", {})
     if sum(staged.values()):
         st.info(
             f"**{sum(staged.values())} image(s) staged for retraining** — "
-            + ", ".join(f"{count} {label}" for label, count in staged.items())
+            + ", ".join(f"{count} {label}" for label, count in staged.items()),
+            icon=":material/inventory_2:",
         )
 
     st.divider()
@@ -535,14 +641,26 @@ def page_predict() -> None:
 
             label = result["prediction"]
             confidence = result["confidence"]
+            infected = label == "Parasitized"
 
-            if label == "Parasitized":
-                st.error(f"### 🦠 {label}")
-            else:
-                st.success(f"### ✅ {label}")
+            verdict_class = "verdict-positive" if infected else "verdict-negative"
+            verdict_sub = (
+                "Parasite detected in this cell"
+                if infected
+                else "No parasite detected"
+            )
 
-            st.metric("Confidence", f"{confidence:.2%}")
-            st.caption(f"Inference latency: {result['latency_ms']} ms")
+            st.markdown(
+                f'<div class="verdict {verdict_class}">'
+                f'<p class="verdict-title">{label}</p>'
+                f'<p class="verdict-sub">{verdict_sub}</p>'
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            col_conf, col_lat = st.columns(2)
+            col_conf.metric("Confidence", f"{confidence:.2%}")
+            col_lat.metric("Latency", f"{result['latency_ms']:.0f} ms")
 
             probabilities = result["probabilities"]
             figure = go.Figure()
@@ -718,8 +836,9 @@ def page_retrain() -> None:
         )
 
     if st.button(
-        "🔄 Start retraining",
+        "Start retraining",
         type="primary",
+        icon=":material/model_training:",
         disabled=not uploads["ready_to_retrain"],
         use_container_width=True,
     ):
@@ -747,18 +866,27 @@ def page_retrain() -> None:
 
     state = job["status"]
     if state == "running":
-        st.info(f"⏳ {job['message']}")
+        st.markdown(status_pill("Retraining in progress", "live"),
+                    unsafe_allow_html=True)
+        st.write("")
+        st.info(job["message"], icon=":material/hourglass_top:")
         st.caption(f"Started {job['started_at']}. Press **Refresh status** to update.")
     elif state == "completed":
-        st.success(f"✅ {job['message']}")
+        st.markdown(status_pill("Completed", "live"), unsafe_allow_html=True)
+        st.write("")
+        st.success(job["message"], icon=":material/task_alt:")
         if job.get("metrics"):
             columns = st.columns(len(job["metrics"]))
             for column, (key, value) in zip(columns, job["metrics"].items()):
                 column.metric(key.replace("_", " ").title(), f"{value:.4f}")
     elif state == "failed":
-        st.error(f"❌ {job['message']}")
+        st.markdown(status_pill("Failed", "down"), unsafe_allow_html=True)
+        st.write("")
+        st.error(job["message"], icon=":material/error:")
     else:
-        st.info("No retraining has been run in this session yet.")
+        st.markdown(status_pill("Idle", "idle"), unsafe_allow_html=True)
+        st.write("")
+        st.caption("No retraining has been run in this session yet.")
 
 
 # ---------------------------------------------------------------------------
@@ -772,25 +900,43 @@ PAGES = {
     "Upload & retrain": page_retrain,
 }
 
+PAGE_CAPTIONS = {
+    "Overview": "Uptime and live model metrics",
+    "Data insights": "Feature analysis of the dataset",
+    "Predict": "Classify a single cell image",
+    "Upload & retrain": "Add data and retrain the model",
+}
+
 
 def main() -> None:
     with st.sidebar:
-        st.title("🔬 Navigation")
-        choice = st.radio("Page", list(PAGES), label_visibility="collapsed")
+        st.markdown("#### Malaria Cell Classifier")
+        st.caption("Diagnostic screening pipeline")
+        st.divider()
+
+        choice = st.radio(
+            "Page",
+            list(PAGES),
+            captions=[PAGE_CAPTIONS[name] for name in PAGES],
+            label_visibility="collapsed",
+        )
 
         st.divider()
-        st.caption(f"**API endpoint**\n\n`{API_URL}`")
 
-        health = api_get("/health")
-        if health:
-            st.success("API reachable")
-        else:
-            st.error("API unreachable")
+        health = api_get("/health", quiet=True)
+        st.markdown(
+            status_pill(
+                "API reachable" if health else "API unreachable",
+                "live" if health else "down",
+            ),
+            unsafe_allow_html=True,
+        )
+        st.caption(f"`{API_URL}`")
 
         st.divider()
         st.caption(
-            "Malaria cell classification pipeline — NIH dataset, 27,558 "
-            "segmented red blood cell images."
+            "NIH dataset — 27,558 segmented red blood cell images, "
+            "expert-annotated and class-balanced."
         )
 
     PAGES[choice]()

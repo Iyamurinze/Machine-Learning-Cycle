@@ -215,14 +215,42 @@ def metrics() -> dict:
 def visualizations(per_class: int = 400) -> dict:
     """Derived feature distributions powering the dashboard charts.
 
-    Computed on a sample rather than all 27k images so the endpoint returns
-    in seconds. `per_class` is capped to keep a caller from asking for a
-    sweep that would pin the worker.
+    Serves the precomputed table shipped with the model when it is available,
+    which is always the case in the deployed container — that image carries no
+    dataset, so computing features live there is impossible. Falls back to
+    computing from raw images on a development machine that has them.
     """
-    from src.preprocessing import build_feature_table
+    from src.preprocessing import (
+        build_feature_table,
+        has_local_images,
+        load_feature_table,
+    )
 
-    per_class = max(50, min(per_class, 1000))
-    frame = build_feature_table(per_class=per_class)
+    per_class = max(50, min(per_class, 1500))
+
+    frame = load_feature_table()
+    source = "precomputed"
+
+    if frame is not None:
+        # Subsample per class so the slider still does something meaningful.
+        frame = (
+            frame.groupby("label", group_keys=False)
+            .apply(lambda g: g.sample(min(len(g), per_class), random_state=42))
+            .reset_index(drop=True)
+        )
+    elif has_local_images():
+        frame = build_feature_table(per_class=per_class)
+        source = "computed"
+    else:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "No feature data available. The precomputed table "
+                "(models/feature_table.csv) is missing and no local images "
+                "were found. Run: python -c \"from src.preprocessing import "
+                'export_feature_table; export_feature_table()"'
+            ),
+        )
 
     features = [
         "intensity_std",
@@ -247,6 +275,7 @@ def visualizations(per_class: int = 400) -> dict:
     return {
         "sample_size": len(frame),
         "per_class": per_class,
+        "source": source,
         "class_counts": frame["label"].value_counts().to_dict(),
         "summary": summary,
         "records": frame.to_dict(orient="records"),
