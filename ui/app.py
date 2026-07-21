@@ -22,7 +22,31 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
-API_URL = os.getenv("API_URL", "http://localhost:8000").rstrip("/")
+def _resolve_api_url() -> str:
+    """Normalise the configured API address into a usable base URL.
+
+    Render's `fromService` wiring injects a bare `host:port` with no scheme,
+    which `requests` rejects outright — the dashboard would report the API
+    unreachable on every page. Rather than depend on whoever sets the
+    environment variable getting the scheme right, missing schemes are filled
+    in here: loopback gets http, anything else gets https.
+    """
+    raw = os.getenv("API_URL", "http://localhost:8000").strip().rstrip("/")
+
+    if "://" not in raw:
+        host = raw.split(":", 1)[0]
+        local = host in {"localhost", "127.0.0.1", "0.0.0.0"}
+        raw = f"{'http' if local else 'https'}://{raw}"
+
+    # A host:443 suffix is redundant once the scheme says https, and some
+    # proxies dislike the explicit port.
+    if raw.startswith("https://") and raw.endswith(":443"):
+        raw = raw[: -len(":443")]
+
+    return raw
+
+
+API_URL = _resolve_api_url()
 REQUEST_TIMEOUT = 30
 
 # Categorical slots 1 and 2 from the reference palette, validated for

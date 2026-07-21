@@ -39,7 +39,10 @@ services:
     envVars:
       - key: PORT
         value: 8501
-      # Wired to the API service's public URL by Render at deploy time.
+      # Wired to the API service by Render at deploy time. Note that
+      # `hostport` yields a bare "host:443" with no scheme, which `requests`
+      # rejects — so ui/app.py normalises a missing scheme rather than
+      # assuming this value is already a usable URL. See _resolve_api_url().
       - key: API_URL
         fromService:
           name: malaria-api
