@@ -39,19 +39,19 @@ services:
     envVars:
       - key: PORT
         value: 8501
-      # Wired to the API service by Render at deploy time.
+      # Set explicitly rather than with `fromService`.
       #
-      # Use `host`, not `hostport`. For a web service `hostport` yields the
-      # *internal* name and port — "malaria-api-xxxx:8000" — which does not
-      # resolve from another container and fails with NameResolutionError.
-      # `host` returns the public hostname, "malaria-api-xxxx.onrender.com".
+      # Neither fromService property yields a reachable address here:
+      #   property: hostport -> "malaria-api-t9ex:8000"
+      #   property: host     -> "malaria-api-t9ex"
+      # Both are private-network names, and free-tier services do not get
+      # private networking, so the dashboard fails with NameResolutionError
+      # either way. The public hostname is the only address that resolves.
       #
-      # Either way the value carries no scheme, so ui/app.py fills one in
-      # rather than assuming this is already a usable URL. See
-      # _resolve_api_url().
+      # IMPORTANT: if you redeploy this blueprint to a fresh Render account,
+      # your API will get a different random suffix. Update this value to your
+      # own malaria-api URL, or the dashboard will point at someone else's
+      # service.
       - key: API_URL
-        fromService:
-          name: malaria-api
-          type: web
-          property: host
+        value: https://malaria-api-t9ex.onrender.com
     autoDeploy: true
