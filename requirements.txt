@@ -1,0 +1,27 @@
+# Core ML
+tensorflow-cpu==2.16.2; sys_platform == "linux"
+tensorflow==2.16.2; sys_platform != "linux"
+
+# TensorFlow 2.16 requires numpy<2 — do not bump this to a 2.x release
+# without also moving TensorFlow.
+numpy==1.26.4
+pandas==2.3.3
+scikit-learn==1.7.2
+Pillow==12.1.1
+
+# Visualization 
+matplotlib==3.10.8
+seaborn==0.13.2
+plotly==6.9.0
+
+# API 
+fastapi==0.139.2
+uvicorn[standard]==0.51.0
+python-multipart==0.0.32
+
+# UI 
+streamlit==1.59.2
+requests==2.32.5
+
+# Load testing 
+locust==2.46.0

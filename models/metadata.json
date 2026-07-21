@@ -1,0 +1,67 @@
+{
+  "events": [
+    {
+      "event": "train",
+      "timestamp": "2026-07-21T10:08:50.646540+00:00",
+      "metrics": {
+        "accuracy": 0.9519,
+        "loss": 0.1753,
+        "precision": 0.9244,
+        "recall": 0.9844,
+        "f1_score": 0.9534,
+        "auc": 0.99
+      },
+      "epochs_run": 8,
+      "best_epoch": 7,
+      "hyperparameters": {
+        "learning_rate": 0.0005,
+        "dropout_rate": 0.3,
+        "l2_factor": 0.0001
+      },
+      "training_minutes": 95.9,
+      "train_images": 22046,
+      "test_images": 5512,
+      "parasite_recall": 0.9194,
+      "parasite_precision": 0.9833
+    },
+    {
+      "event": "retrain",
+      "timestamp": "2026-07-21T10:47:02.986676+00:00",
+      "metrics": {
+        "accuracy": 0.9639,
+        "loss": 0.1441,
+        "precision": 0.9529,
+        "recall": 0.9761,
+        "auc": 0.9913,
+        "f1_score": 0.9643
+      },
+      "epochs": 3,
+      "learning_rate": 0.0001,
+      "new_images": {
+        "Parasitized": 40,
+        "Uninfected": 40
+      },
+      "included_base_data": true
+    }
+  ],
+  "latest": {
+    "event": "retrain",
+    "timestamp": "2026-07-21T10:47:02.986676+00:00",
+    "metrics": {
+      "accuracy": 0.9639,
+      "loss": 0.1441,
+      "precision": 0.9529,
+      "recall": 0.9761,
+      "auc": 0.9913,
+      "f1_score": 0.9643
+    },
+    "epochs": 3,
+    "learning_rate": 0.0001,
+    "new_images": {
+      "Parasitized": 40,
+      "Uninfected": 40
+    },
+    "included_base_data": true
+  },
+  "version": 2
+}

@@ -1,0 +1,32 @@
+# --- Dataset -----------------------------------------------------------
+# The full NIH dataset is ~1 GB across raw + split copies, far past what
+# GitHub will take. It is reproducible from src/data_acquisition.py, so the
+# bulk images are ignored and only a small committed sample ships in the
+# repo (see data/sample/) to keep the structure demonstrable.
+data/raw/
+data/train/**/*.png
+data/test/**/*.png
+data/uploads/**
+!data/**/.gitkeep
+
+# --- Models ------------------------------------------------------------
+# The trained baseline model IS committed (the rubric requires the model
+# file). Retrained checkpoints produced at runtime are not.
+models/retrained_*
+models/checkpoints/
+*.h5.tmp
+
+# --- Python ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# --- Tooling -----------------------------------------------------------
+.DS_Store
+.env
+locust/reports/*.html
+!locust/reports/.gitkeep

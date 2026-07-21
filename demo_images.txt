@@ -1,0 +1,10 @@
+data/test/Parasitized/C101P62ThinF_IMG_20150918_151335_cell_73.png  # Parasitized, confidence 1.0000
+data/test/Parasitized/C101P62ThinF_IMG_20150918_151239_cell_95.png  # Parasitized, confidence 1.0000
+data/test/Parasitized/C101P62ThinF_IMG_20150918_151239_cell_94.png  # Parasitized, confidence 1.0000
+data/test/Parasitized/C101P62ThinF_IMG_20150918_151149_cell_69.png  # Parasitized, confidence 1.0000
+data/test/Parasitized/C101P62ThinF_IMG_20150918_151239_cell_86.png  # Parasitized, confidence 0.9999
+data/test/Uninfected/C100P61ThinF_IMG_20150918_145042_cell_33.png  # Uninfected, confidence 0.9922
+data/test/Uninfected/C101P62ThinF_IMG_20150918_151335_cell_13.png  # Uninfected, confidence 0.9918
+data/test/Uninfected/C101P62ThinF_IMG_20150918_151335_cell_16.png  # Uninfected, confidence 0.9896
+data/test/Uninfected/C101P62ThinF_IMG_20150918_151507_cell_48.png  # Uninfected, confidence 0.9879
+data/test/Uninfected/C100P61ThinF_IMG_20150918_144348_cell_131.png  # Uninfected, confidence 0.9852

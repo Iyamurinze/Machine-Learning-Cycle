@@ -1,0 +1,48 @@
+# Render blueprint — deploys the API and the dashboard as two Docker services.
+#
+# Deploy by pointing Render at this repository: New > Blueprint. Render reads
+# this file and creates both services.
+#
+# Note on the free tier: instances sleep after 15 minutes idle and cold-start
+# in roughly 30-60 seconds, most of which is TensorFlow importing. The first
+# request after a sleep will be slow; subsequent ones are not. For the demo
+# video and the load test, wake the service first.
+
+services:
+  - type: web
+    name: malaria-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    region: frankfurt
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: TF_CPP_MIN_LOG_LEVEL
+        value: "2"
+      # A free instance has limited CPU; letting TensorFlow spawn a thread per
+      # core causes contention rather than speedup on a shared vCPU.
+      - key: OMP_NUM_THREADS
+        value: "2"
+    autoDeploy: true
+
+  - type: web
+    name: malaria-ui
+    runtime: docker
+    dockerfilePath: ./Dockerfile.ui
+    dockerContext: .
+    plan: free
+    region: frankfurt
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: PORT
+        value: 8501
+      # Wired to the API service's public URL by Render at deploy time.
+      - key: API_URL
+        fromService:
+          name: malaria-api
+          type: web
+          property: hostport
+    autoDeploy: true

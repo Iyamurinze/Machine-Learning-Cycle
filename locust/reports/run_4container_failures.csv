@@ -1,0 +1,3 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+POST,/predict,"CatchResponseError('Wrong class: said Uninfected, expected Parasitized')",20,2026-07-21T11:52:56Z,2026-07-21T11:54:38Z
+POST,/predict,"CatchResponseError('Wrong class: said Parasitized, expected Uninfected')",9,2026-07-21T11:52:54Z,2026-07-21T11:54:38Z

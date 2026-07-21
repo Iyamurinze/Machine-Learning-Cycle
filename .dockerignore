@@ -1,0 +1,24 @@
+# The dataset is ~1 GB and is never needed inside an image — the API serves a
+# pre-trained model and stages uploads at runtime. Leaving it out of the build
+# context is the difference between a 20-second and a 10-minute build.
+data/
+!data/.gitkeep
+
+# Training checkpoints are a training artefact — the serving image needs only
+# the final model and its metadata.
+models/checkpoints/
+
+notebook/
+locust/
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+README.md
+docs/
+*.md
+!requirements.txt
