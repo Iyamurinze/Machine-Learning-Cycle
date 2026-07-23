@@ -75,16 +75,21 @@ RETRAIN_SEED = 42
 # Set LOW_MEMORY=0 on a larger instance to restore the faster defaults.
 LOW_MEMORY = os.getenv("LOW_MEMORY", "0").lower() in {"1", "true", "yes"}
 
-# Additional memory a retrain needs beyond the resting footprint.
+# Peak memory a retrain reaches, and the resting footprint it starts from.
 #
-# Calibrated against a real OOM rather than guessed. Under a 512 MB cap the
-# service rests at ~265 MB free after loading the model, and a retrain there
-# is still killed (exit 137) even at batch size 8 with caching disabled — so
-# the true requirement is above 265 MB. 400 MB is set as a deliberately
-# conservative floor: the cost of refusing a job that might just have fitted
-# is a clear error message, while the cost of allowing one that does not is
-# the whole service being killed and restarted mid-run.
+# Both calibrated against real OOM kills, not guessed. The critical subtlety:
+# retraining must be judged against the instance *limit*, never the currently
+# free memory. A freshly started container has not imported TensorFlow, so it
+# reports ~490 MB free of 512 — but the retrain itself imports TensorFlow
+# (~450 MB) and then trains on top of that, so the transient free figure says
+# nothing about whether the job fits. Verified: a cold 512 MB container with
+# 491 MB "free" is still OOM-killed (exit 137) by a 20-image, single-epoch,
+# batch-8 retrain the moment TensorFlow loads.
+#
+# The honest test is therefore: does (resting footprint after TF + model) plus
+# training headroom fit under the limit? On 512 MB it does not, cold or warm.
 RETRAIN_MEMORY_ESTIMATE_MB = int(os.getenv("RETRAIN_MEMORY_ESTIMATE_MB", "400"))
+RETRAIN_RESTING_MB = int(os.getenv("RETRAIN_RESTING_MB", "265"))
 RETRAIN_BATCH_SIZE = int(os.getenv("RETRAIN_BATCH_SIZE", "16" if LOW_MEMORY else "64"))
 EVAL_BATCH_SIZE = int(os.getenv("EVAL_BATCH_SIZE", "16" if LOW_MEMORY else "64"))
 
@@ -224,13 +229,18 @@ def read_memory() -> dict:
     }
 
     if limit and used:
-        info["free_mb"] = round((limit - used) / 1e6, 1)
+        limit_mb = limit / 1e6
+        info["free_mb"] = round(limit_mb - used / 1e6, 1)
         info["used_percent"] = round(used / limit * 100, 1)
-
-        # Measured: importing TensorFlow and serving one prediction settles
-        # around 260 MB, and a retrain needs roughly 250 MB beyond that.
         info["retrain_headroom_mb"] = RETRAIN_MEMORY_ESTIMATE_MB
-        info["retrain_fits"] = (limit - used) / 1e6 > RETRAIN_MEMORY_ESTIMATE_MB
+
+        # Judge against the limit, not the transient free figure. A retrain
+        # brings the process to roughly (resting-after-TF + training-headroom)
+        # regardless of how much is free at the instant it starts, because it
+        # loads TensorFlow itself. So the instance simply has to be large
+        # enough to hold that peak.
+        info["retrain_peak_mb"] = RETRAIN_RESTING_MB + RETRAIN_MEMORY_ESTIMATE_MB
+        info["retrain_fits"] = limit_mb >= info["retrain_peak_mb"]
 
     return info
 
@@ -769,13 +779,16 @@ def trigger_retrain(
         raise HTTPException(
             status_code=507,
             detail=(
-                f"Not enough memory to retrain. This instance has "
-                f"{memory['limit_mb']:.0f} MB with {memory['free_mb']:.0f} MB "
-                f"free; retraining needs roughly "
-                f"{memory['retrain_headroom_mb']} MB beyond current usage. "
-                "Starting anyway would be killed by the platform partway "
-                "through and restart the service. Run retraining locally, or "
-                "use an instance with at least 1 GB."
+                f"Not enough memory to retrain. This instance has a "
+                f"{memory['limit_mb']:.0f} MB limit, and a retrain peaks near "
+                f"{memory.get('retrain_peak_mb', 665)} MB once TensorFlow is "
+                "loaded and training runs on top of it. The amount currently "
+                "free does not change this: the retrain imports TensorFlow "
+                "itself, so a fresh container showing plenty of free memory is "
+                "still killed the moment training starts (verified: exit 137). "
+                "The dataset size is irrelevant — images stream in small "
+                "batches and are never all resident. Run retraining locally, "
+                "or use an instance with at least 1 GB."
             ),
         )
 
