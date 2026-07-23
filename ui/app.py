@@ -623,6 +623,7 @@ def render_prediction(
     filename: str,
     true_label: str | None = None,
     require_click: bool = False,
+    key: str = "prediction",
 ) -> None:
     """Classify one image and render the verdict, metrics and probabilities.
 
@@ -690,9 +691,14 @@ def render_prediction(
                 )
             )
         figure.update_xaxes(range=[0, 1.15], tickformat=".0%")
+        # A unique key per call site. Two prediction results can render on one
+        # page run (an example and an upload), and Streamlit derives an
+        # element's ID from its type plus parameters — two probability charts
+        # would otherwise collide with a StreamlitDuplicateElementId error.
         st.plotly_chart(
             style_axes(figure, "Class probabilities", "Probability", ""),
             use_container_width=True,
+            key=f"probchart_{key}",
         )
 
         if confidence < 0.75:
@@ -713,6 +719,12 @@ def page_predict() -> None:
     # and telling someone to open a local folder is useless in a browser.
     payload = api_get("/samples", quiet=True)
     sample_list = (payload or {}).get("samples", [])
+
+    # An uploaded file takes precedence over a previously-picked example, so
+    # exactly one result renders. The uploader is keyed, which means its
+    # current value is readable here — before the example section — via
+    # session state, even though the widget itself is drawn further down.
+    has_upload = st.session_state.get("predict_upload") is not None
 
     if sample_list:
         st.markdown("#### Try an example")
@@ -743,29 +755,37 @@ def page_predict() -> None:
                     icon=":material/play_arrow:",
                 ):
                     st.session_state["sample_pick"] = entry
-                    st.session_state.pop("upload_pick", None)
 
-        # Result renders here, directly under the examples.
+        # Result renders directly under the examples, unless an upload is
+        # present and takes over below.
         picked = st.session_state.get("sample_pick")
-        if picked:
+        if picked and not has_upload:
             st.divider()
             sample_bytes = fetch_sample_bytes(picked["label"], picked["filename"])
             if sample_bytes:
                 render_prediction(
-                    sample_bytes, picked["filename"], true_label=picked["label"]
+                    sample_bytes,
+                    picked["filename"],
+                    true_label=picked["label"],
+                    key="sample",
                 )
 
         st.divider()
 
     st.markdown("#### Or upload your own")
+    if has_upload and sample_list:
+        st.caption("An uploaded image takes precedence over the examples above.")
+
     uploaded = st.file_uploader(
-        "Cell image", type=["png", "jpg", "jpeg"], accept_multiple_files=False
+        "Cell image",
+        type=["png", "jpg", "jpeg"],
+        accept_multiple_files=False,
+        key="predict_upload",
     )
 
     if uploaded is not None:
-        st.session_state.pop("sample_pick", None)
         st.divider()
-        render_prediction(uploaded.getvalue(), uploaded.name)
+        render_prediction(uploaded.getvalue(), uploaded.name, key="upload")
     elif not sample_list:
         st.info(
             "Upload a segmented red blood cell image to classify it.",
