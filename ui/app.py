@@ -156,6 +156,32 @@ CUSTOM_CSS = """
 
   /* Sidebar nav: quieter label, roomier hit targets. */
   section[data-testid="stSidebar"] .stRadio label { padding: 0.15rem 0; }
+
+  /* Colour-coded memory cards. Each takes its accent from --c: the value text
+     is the accent, over a faint tint of the same colour with a matching
+     border, so the three cards read as blue / orange / green at a glance. */
+  .mem-card {
+    background: color-mix(in srgb, var(--c) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    height: 100%;
+  }
+  .mem-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    opacity: 0.7;
+    margin-bottom: 0.15rem;
+  }
+  .mem-value {
+    font-size: 1.55rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: var(--c);
+    line-height: 1.1;
+  }
+  .mem-sub { font-size: 0.76rem; opacity: 0.6; margin-top: 0.3rem; }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -909,54 +935,48 @@ def page_retrain() -> None:
     st.divider()
     st.subheader("2. Trigger retraining")
 
-    # The hosted instance has 512 MB; TensorFlow plus the loaded model already
-    # occupies ~260 MB of it, and training exceeds what remains. The platform
-    # kills the process outright, so the job cannot report its own failure —
-    # it just appears to reset. Warn rather than let someone discover that by
-    # clicking.
+    # Memory panel: three colour-coded cards. Blue = the instance limit,
+    # orange = what is currently in use, green = what remains free. The values
+    # come straight from the container's cgroup via GET /status.
     service_status = api_get("/status", quiet=True) or {}
     memory = service_status.get("memory") or {}
 
     if memory.get("limit_mb"):
         st.markdown("**Instance memory**")
-        col_lim, col_used, col_free = st.columns(3)
-        col_lim.metric("Limit", f"{memory['limit_mb']:.0f} MB")
-        col_used.metric(
-            "In use",
-            f"{memory['used_mb']:.0f} MB",
-            f"{memory.get('used_percent', 0):.0f}% of limit",
-            delta_color="off",
-        )
-        col_free.metric(
-            "Free",
-            f"{memory.get('free_mb', 0):.0f} MB",
-            f"retrain needs ~{memory.get('retrain_headroom_mb', 250)} MB",
-            delta_color="off",
-        )
 
-        if memory.get("retrain_fits") is False:
-            st.error(
-                f"**Not enough memory to retrain on this instance.** "
-                f"{memory['limit_mb']:.0f} MB total, {memory['free_mb']:.0f} MB "
-                f"free, and retraining needs roughly "
-                f"{memory.get('retrain_headroom_mb', 250)} MB more.\n\n"
-                "Importing TensorFlow alone accounts for most of the footprint, "
-                "and it cannot be released — clearing caches or unloading the "
-                "model reclaims almost nothing, because the cost is the "
-                "framework's runtime rather than cached data.\n\n"
-                "Uploading and preprocessing work here. Run the retraining "
-                "itself locally with `uvicorn api.main:app`, or on an instance "
-                "with at least 1 GB.",
-                icon=":material/memory:",
+        def mem_card(label: str, value: str, sub: str, color: str) -> str:
+            sub_html = f'<div class="mem-sub">{sub}</div>' if sub else ""
+            return (
+                f'<div class="mem-card" style="--c:{color}">'
+                f'<div class="mem-label">{label}</div>'
+                f'<div class="mem-value">{value}</div>'
+                f"{sub_html}</div>"
             )
-        elif memory.get("retrain_fits"):
-            st.caption("Sufficient memory available to retrain on this instance.")
-    elif service_status.get("low_memory"):
-        st.warning(
-            "This instance is configured as memory-constrained; retraining "
-            "may not complete. Run it locally if it fails.",
-            icon=":material/memory:",
+
+        col_lim, col_used, col_free = st.columns(3)
+        col_lim.markdown(
+            mem_card("Limit", f"{memory['limit_mb']:.0f} MB", "", "#2a78d6"),
+            unsafe_allow_html=True,
         )
+        col_used.markdown(
+            mem_card(
+                "In use",
+                f"{memory['used_mb']:.0f} MB",
+                f"{memory.get('used_percent', 0):.0f}% of limit",
+                "#eb6834",
+            ),
+            unsafe_allow_html=True,
+        )
+        col_free.markdown(
+            mem_card(
+                "Free",
+                f"{memory.get('free_mb', 0):.0f} MB",
+                f"retrain needs ~{memory.get('retrain_headroom_mb', 250)} MB",
+                "#12a150",
+            ),
+            unsafe_allow_html=True,
+        )
+        st.write("")
 
     col_epochs, col_lr = st.columns(2)
     epochs = col_epochs.slider("Epochs", 1, 20, 5)
@@ -1081,8 +1101,8 @@ def main() -> None:
 
         st.divider()
         st.caption(
-            "NIH dataset — 27,558 segmented red blood cell images, "
-            "expert-annotated and class-balanced."
+            "NIH dataset 27,558 segmented red blood cell images, "
+            "expert annotated and class balanced."
         )
 
     PAGES[choice]()
